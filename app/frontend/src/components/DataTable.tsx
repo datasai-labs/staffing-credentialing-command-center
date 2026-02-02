@@ -3,6 +3,7 @@ import {
   DataGrid,
   GridColDef,
   GridPaginationModel,
+  GridRowSelectionModel,
   GridSortModel,
   GridToolbar
 } from "@mui/x-data-grid";
@@ -29,7 +30,12 @@ export function DataTable<T extends { [k: string]: any }>({
   state,
   onStateChange,
   getRowId,
-  onRowClick
+  onRowClick,
+  height = 640,
+  csvFileName = "export",
+  checkboxSelection,
+  rowSelectionModel,
+  onRowSelectionModelChange
 }: {
   rows: T[];
   columns: GridColDef[];
@@ -39,6 +45,11 @@ export function DataTable<T extends { [k: string]: any }>({
   onStateChange: (s: ServerTableState) => void;
   getRowId: (row: T) => string;
   onRowClick?: (row: T) => void;
+  height?: number;
+  csvFileName?: string;
+  checkboxSelection?: boolean;
+  rowSelectionModel?: GridRowSelectionModel;
+  onRowSelectionModelChange?: (m: GridRowSelectionModel) => void;
 }) {
   const paginationModel: GridPaginationModel = {
     page: state.page - 1,
@@ -55,7 +66,7 @@ export function DataTable<T extends { [k: string]: any }>({
     : [];
 
   return (
-    <Box sx={{ height: 640, width: "100%" }}>
+    <Box sx={{ height, width: "100%" }}>
       <DataGrid
         rows={rows}
         columns={columns}
@@ -64,6 +75,9 @@ export function DataTable<T extends { [k: string]: any }>({
         rowCount={total}
         paginationMode="server"
         sortingMode="server"
+        checkboxSelection={checkboxSelection}
+        rowSelectionModel={rowSelectionModel}
+        onRowSelectionModelChange={onRowSelectionModelChange}
         paginationModel={paginationModel}
         onPaginationModelChange={(m) =>
           onStateChange({
@@ -94,7 +108,7 @@ export function DataTable<T extends { [k: string]: any }>({
         }}
         slotProps={{
           toolbar: {
-            csvOptions: { fileName: "export" },
+            csvOptions: { fileName: csvFileName },
             printOptions: { disableToolbarButton: true }
           }
         }}

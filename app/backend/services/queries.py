@@ -11,6 +11,14 @@ def fq_gold(table: str) -> str:
     return f"{settings.databricks_catalog}.{settings.databricks_schema_gold}.{table}"
 
 
+def fq_ref(table: str) -> str:
+    return f"{settings.databricks_catalog}.{settings.databricks_schema_ref}.{table}"
+
+
+def fq_silver(table: str) -> str:
+    return f"{settings.databricks_catalog}.{settings.databricks_schema_silver}.{table}"
+
+
 SortDir = Literal["asc", "desc"]
 
 
@@ -184,6 +192,47 @@ def staffing_gaps_list_sql(
     return data_sql, count_sql, params
 
 
+def staffing_gaps_no_eligible_list_sql(
+    *,
+    start_date: Optional[date],
+    end_date: Optional[date],
+    facility_id: Optional[str],
+    risk_level: Optional[str],
+    procedure_code: Optional[str],
+    page: int,
+    page_size: int,
+    sort: Optional[str],
+) -> Tuple[str, str, dict[str, Any]]:
+    """
+    Worklist: shifts with NO eligible providers.
+    Derived from gold.staffing_gaps where eligible_provider_count = 0.
+    """
+    data_sql, count_sql, params = staffing_gaps_list_sql(
+        start_date=start_date,
+        end_date=end_date,
+        facility_id=facility_id,
+        risk_level=risk_level,
+        procedure_code=procedure_code,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+    )
+    # Both queries already include WHERE (optional) and paging; inject eligibility filter safely.
+    # If there is already a WHERE clause, append with AND; else add WHERE.
+    if " WHERE " in data_sql:
+        data_sql = data_sql.replace(" WHERE ", " WHERE eligible_provider_count = 0 AND ", 1)
+        count_sql = count_sql.replace(" WHERE ", " WHERE eligible_provider_count = 0 AND ", 1)
+    else:
+        table = fq_gold("staffing_gaps")
+        # In the unlikely case staffing_gaps_list_sql changes, keep a robust fallback.
+        data_sql = (
+            f"SELECT * FROM {table} WHERE eligible_provider_count = 0"
+            f" ORDER BY gap_count desc LIMIT :limit OFFSET :offset"
+        )
+        count_sql = f"SELECT COUNT(1) AS total FROM {table} WHERE eligible_provider_count = 0"
+    return data_sql, count_sql, params
+
+
 def shift_recommendations_sql(shift_id: str) -> Tuple[str, dict[str, Any]]:
     table = fq_gold("shift_recommendations")
     return f"SELECT * FROM {table} WHERE shift_id = :shift_id", {"shift_id": shift_id}
@@ -238,6 +287,165 @@ def credential_risk_list_sql(
     count_sql = f"SELECT COUNT(1) AS total FROM {table}{where.where_sql}"
     return data_sql, count_sql, params
 
+
+def credential_expiring_worklist_sql(
+    *,
+    provider_id: Optional[str],
+    specialty: Optional[str],
+    facility_id: Optional[str],
+    cred_type: Optional[str],
+    risk_bucket: Optional[str],
+    page: int,
+    page_size: int,
+    sort: Optional[str],
+) -> Tuple[str, str, dict[str, Any]]:
+    """
+    Worklist: expiring credentials enriched with provider 360 fields.
+    Derived from gold.credential_risk joined to gold.provider_360_flat.
+    """
+    cr = fq_gold("credential_risk")
+    p = fq_gold("provider_360_flat")
+    clauses: list[str] = []
+    params: dict[str, Any] = {}
+
+    if provider_id:
+        params["provider_id"] = provider_id
+        clauses.append("cr.provider_id = :provider_id")
+    if cred_type:
+        params["cred_type"] = cred_type
+        clauses.append("cr.cred_type = :cred_type")
+    if specialty:
+        params["specialty"] = specialty
+        clauses.append("p.specialty = :specialty")
+    if facility_id:
+        params["facility_id"] = facility_id
+        clauses.append("p.home_facility_id = :facility_id")
+
+    buckets = _csv_list(risk_bucket)
+    if buckets:
+        placeholders = []
+        for i, b in enumerate(buckets):
+            key = f"bucket{i}"
+            params[key] = b
+            placeholders.append(f":{key}")
+        clauses.append(f"cr.risk_bucket IN ({', '.join(placeholders)})")
+
+    where = _build_where(clauses, params)
+    allowed = {
+        "expires_at",
+        "days_until_expiration",
+        "risk_bucket",
+        "cred_type",
+        "provider_id",
+        "provider_name",
+        "specialty",
+        "home_facility_name",
+    }
+    sort_field, sort_dir = _safe_sort(sort, allowed, default="days_until_expiration")
+
+    params = {**where.params, "limit": page_size, "offset": (page - 1) * page_size}
+    select_sql = (
+        "SELECT cr.*, "
+        "p.provider_name, p.specialty, p.home_facility_id, p.home_facility_name "
+        f"FROM {cr} cr "
+        f"LEFT JOIN {p} p ON p.provider_id = cr.provider_id"
+    )
+    data_sql = (
+        f"{select_sql}"
+        f"{where.where_sql}"
+        f" ORDER BY {sort_field} {sort_dir}"
+        " LIMIT :limit OFFSET :offset"
+    )
+    count_sql = f"SELECT COUNT(1) AS total FROM {cr} cr LEFT JOIN {p} p ON p.provider_id = cr.provider_id{where.where_sql}"
+    return data_sql, count_sql, params
+
+
+def providers_blockers_worklist_sql(
+    *,
+    facility_id: Optional[str],
+    specialty: Optional[str],
+    blocker: Optional[str],
+    page: int,
+    page_size: int,
+    sort: Optional[str],
+) -> Tuple[str, str, dict[str, Any]]:
+    """
+    Worklist: providers who are ACTIVE but blocked by readiness factors.
+    Derived from gold.provider_360_flat; blocker reasons are computed in app layer.
+    """
+    table = fq_gold("provider_360_flat")
+    clauses: list[str] = ["provider_status = 'ACTIVE'"]
+    params: dict[str, Any] = {}
+
+    if facility_id:
+        params["facility_id"] = facility_id
+        clauses.append("home_facility_id = :facility_id")
+    if specialty:
+        params["specialty"] = specialty
+        clauses.append("specialty = :specialty")
+
+    # Blocker filter (best-effort, keeps SQL simple and safe).
+    if blocker:
+        b = blocker.upper().strip()
+        if b == "LICENSE":
+            clauses.append("COALESCE(state_license_days_left, -999999) < 0")
+        elif b == "ACLS":
+            clauses.append("COALESCE(acls_days_left, -999999) < 0")
+        elif b == "PRIVILEGE":
+            clauses.append("COALESCE(active_privilege_count, 0) = 0")
+        elif b == "PAYER":
+            clauses.append("COALESCE(active_payer_count, 0) = 0")
+
+    # Always require at least one blocker to be present
+    clauses.append(
+        "("
+        " COALESCE(state_license_days_left, -999999) < 0"
+        " OR COALESCE(acls_days_left, -999999) < 0"
+        " OR COALESCE(active_privilege_count, 0) = 0"
+        " OR COALESCE(active_payer_count, 0) = 0"
+        ")"
+    )
+
+    where = _build_where(clauses, params)
+    allowed = {
+        "provider_name",
+        "specialty",
+        "home_facility_name",
+        "state_license_days_left",
+        "acls_days_left",
+        "active_privilege_count",
+        "active_payer_count",
+        "last_built_at",
+    }
+    sort_field, sort_dir = _safe_sort(sort, allowed, default="last_built_at")
+
+    params = {**where.params, "limit": page_size, "offset": (page - 1) * page_size}
+    data_sql = (
+        f"SELECT * FROM {table}"
+        f"{where.where_sql}"
+        f" ORDER BY {sort_field} {sort_dir}"
+        " LIMIT :limit OFFSET :offset"
+    )
+    count_sql = f"SELECT COUNT(1) AS total FROM {table}{where.where_sql}"
+    return data_sql, count_sql, params
+
+
+def staffing_gaps_by_ids_sql(shift_ids: list[str]) -> Tuple[str, dict[str, Any]]:
+    table = fq_gold("staffing_gaps")
+    if not shift_ids:
+        return f"SELECT * FROM {table} WHERE 1=0", {}
+    placeholders = ", ".join([f":sid{i}" for i in range(len(shift_ids))])
+    params = {f"sid{i}": sid for i, sid in enumerate(shift_ids)}
+    return f"SELECT * FROM {table} WHERE shift_id IN ({placeholders})", params
+
+
+def shift_recommendations_by_ids_sql(shift_ids: list[str]) -> Tuple[str, dict[str, Any]]:
+    table = fq_gold("shift_recommendations")
+    if not shift_ids:
+        return f"SELECT * FROM {table} WHERE 1=0", {}
+    placeholders = ", ".join([f":sid{i}" for i in range(len(shift_ids))])
+    params = {f"sid{i}": sid for i, sid in enumerate(shift_ids)}
+    return f"SELECT * FROM {table} WHERE shift_id IN ({placeholders})", params
 
 def kpis_trend_sql(days: int) -> Tuple[str, dict[str, Any]]:
     table = fq_gold("kpi_summary_daily")

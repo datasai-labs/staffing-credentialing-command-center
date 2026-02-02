@@ -14,21 +14,30 @@ import { useActions, useCreateAction, useUpdateAction } from "../api/hooks";
 import { RiskAction } from "../api/types";
 import { ErrorState } from "./States";
 
+const ACTION_TYPES = ["OUTREACH", "CREDENTIAL_EXPEDITE", "PRIVILEGE_REQUEST", "PAYER_ENROLLMENT_FOLLOWUP"] as const;
+type ActionType = (typeof ACTION_TYPES)[number];
+
 function statusColor(s: RiskAction["status"]): "default" | "warning" | "success" {
   if (s === "RESOLVED") return "success";
   if (s === "IN_PROGRESS") return "warning";
   return "default";
 }
 
+function normalizeActionType(v: string | undefined, fallback: ActionType): ActionType {
+  if (!v) return fallback;
+  return (ACTION_TYPES as readonly string[]).includes(v) ? (v as ActionType) : fallback;
+}
+
 export function ActionsPanel(props: {
   entityType: "SHIFT" | "PROVIDER";
   entityId: string;
   facilityId?: string;
-  defaultActionType?: string;
+  defaultActionType?: ActionType;
 }) {
   const { entityType, entityId, facilityId } = props;
   const [showNew, setShowNew] = useState(false);
-  const [actionType, setActionType] = useState(props.defaultActionType ?? (entityType === "SHIFT" ? "OUTREACH" : "CREDENTIAL_EXPEDITE"));
+  const defaultType: ActionType = entityType === "SHIFT" ? "OUTREACH" : "CREDENTIAL_EXPEDITE";
+  const [actionType, setActionType] = useState<ActionType>(normalizeActionType(props.defaultActionType, defaultType));
   const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH">("MEDIUM");
   const [owner, setOwner] = useState("");
   const [notes, setNotes] = useState("");
@@ -68,13 +77,14 @@ export function ActionsPanel(props: {
                 size="small"
                 label="Type"
                 value={actionType}
-                onChange={(e) => setActionType(e.target.value)}
+                onChange={(e) => setActionType(normalizeActionType(e.target.value, defaultType))}
                 sx={{ flex: 1 }}
               >
-                <MenuItem value="OUTREACH">OUTREACH</MenuItem>
-                <MenuItem value="CREDENTIAL_EXPEDITE">CREDENTIAL_EXPEDITE</MenuItem>
-                <MenuItem value="PRIVILEGE_REQUEST">PRIVILEGE_REQUEST</MenuItem>
-                <MenuItem value="PAYER_ENROLLMENT_FOLLOWUP">PAYER_ENROLLMENT_FOLLOWUP</MenuItem>
+                {ACTION_TYPES.map((t) => (
+                  <MenuItem key={t} value={t}>
+                    {t}
+                  </MenuItem>
+                ))}
               </TextField>
               <TextField
                 select

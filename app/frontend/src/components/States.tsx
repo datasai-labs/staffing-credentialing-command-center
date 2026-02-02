@@ -1,5 +1,18 @@
 import React from "react";
-import { Alert, Box, Button, Skeleton, Stack, Typography } from "@mui/material";
+import { Alert, Box, Button, CircularProgress, Skeleton, Stack, Typography } from "@mui/material";
+
+export function LoadingState({ message = "Loading..." }: { message?: string }) {
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", p: 4 }}>
+      <Stack spacing={2} alignItems="center">
+        <CircularProgress size={32} />
+        <Typography variant="body2" color="text.secondary">
+          {message}
+        </Typography>
+      </Stack>
+    </Box>
+  );
+}
 
 export function LoadingSkeleton({ rows = 8 }: { rows?: number }) {
   return (

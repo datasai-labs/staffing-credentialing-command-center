@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     databricks_catalog: str = Field(default="rtpa_catalog", alias="DATABRICKS_CATALOG")
     databricks_schema_gold: str = Field(default="credentialing_gold", alias="DATABRICKS_SCHEMA_GOLD")
+    databricks_schema_silver: str = Field(default="credentialing_silver", alias="DATABRICKS_SCHEMA_SILVER")
+    databricks_schema_ref: str = Field(default="credentialing_ref", alias="DATABRICKS_SCHEMA_REF")
 
     cors_allow_origins: Optional[str] = Field(default=None, alias="CORS_ALLOW_ORIGINS")
 

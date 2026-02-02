@@ -16,14 +16,20 @@ import DashboardIcon from "@mui/icons-material/Dashboard";
 import PeopleIcon from "@mui/icons-material/People";
 import WarningIcon from "@mui/icons-material/Warning";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
+import PlaylistAddCheckIcon from "@mui/icons-material/PlaylistAddCheck";
+import TuneIcon from "@mui/icons-material/Tune";
+import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
 
 const drawerWidth = 240;
 
 const navItems = [
   { label: "Overview", path: "/", icon: <DashboardIcon /> },
+  { label: "Worklists", path: "/worklists", icon: <PlaylistAddCheckIcon /> },
   { label: "Staffing gaps", path: "/staffing", icon: <WarningIcon /> },
+  { label: "Nurse staffing", path: "/nurse-staffing", icon: <LocalHospitalIcon /> },
   { label: "Providers", path: "/providers", icon: <PeopleIcon /> },
-  { label: "Credential risk", path: "/credentials", icon: <FactCheckIcon /> }
+  { label: "Credential risk", path: "/credentials", icon: <FactCheckIcon /> },
+  // { label: "Scenario planner", path: "/scenarios", icon: <TuneIcon /> }
 ];
 
 export function App() {
@@ -35,7 +41,7 @@ export function App() {
       <AppBar position="fixed" sx={{ zIndex: (t) => t.zIndex.drawer + 1 }}>
         <Toolbar>
           <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 800, letterSpacing: -0.2 }}>
-            Staffing + Credentialing
+            Staffing Command Center
           </Typography>
         </Toolbar>
       </AppBar>
@@ -54,7 +60,7 @@ export function App() {
             {navItems.map((item) => (
               <ListItemButton
                 key={item.path}
-                selected={location.pathname === item.path}
+                selected={item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)}
                 onClick={() => navigate(item.path)}
                 sx={{
                   mx: 1,
