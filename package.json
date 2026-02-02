@@ -1,0 +1,9 @@
+{
+  "name": "staffing-credentialing-demo",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "cd app/frontend && npm ci && npm run build"
+  }
+}
+

@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.30.6
+pydantic==2.10.6
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+databricks-sql-connector==3.5.0
+cachetools==5.5.0
+orjson==3.10.15
+requests==2.32.3

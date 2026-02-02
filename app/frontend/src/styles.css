@@ -1,0 +1,36 @@
+:root {
+  --bg: #f5f7fa;
+  --panel: #ffffff;
+  --text: #0f172a;
+  --muted: rgba(15, 23, 42, 0.72);
+  --border: rgba(15, 23, 42, 0.12);
+  --primary: #0b5fae;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Subtle, "clinical" feel */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Optional: slightly nicer scrollbars (WebKit) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 999px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.28);
+}
+

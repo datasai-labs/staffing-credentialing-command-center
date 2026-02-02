@@ -1,0 +1,141 @@
+bundle:
+  name: staffing-credentialing-demo
+
+# This bundle focuses on making the demo reproducible: it runs notebooks 01–05 to create Unity Catalog tables.
+# Databricks Apps deployment via DAB varies by CLI/version; see README section added by this repo.
+
+variables:
+  catalog:
+    default: rtpa_catalog
+  schema_ref:
+    default: credentialing_ref
+  schema_bronze:
+    default: credentialing_bronze
+  schema_silver:
+    default: credentialing_silver
+  schema_gold:
+    default: credentialing_gold
+
+  seed:
+    default: 42
+  n_providers:
+    default: 200
+  days_schedule:
+    default: 14
+
+  # Serverless workspace assumption:
+  # - Notebook tasks still need Spark compute (not a SQL Warehouse).
+  # - In serverless-first workspaces, it's common to enforce "serverless jobs compute" via a cluster policy.
+  #   Provide the policy id here (create/select one in your workspace).
+  cluster_policy_id:
+    default: "<your-serverless-jobs-cluster-policy-id>"
+  num_workers:
+    default: 1
+
+  # App connectivity (not used by the notebook job itself):
+  # The FastAPI app reads from a Databricks SQL Warehouse; in a serverless workspace you typically use the
+  # default Serverless SQL Warehouse. Keep this as documentation/parameterization for your app deploy step.
+  sql_warehouse_id:
+    default: "<default-serverless-sql-warehouse-id>"
+
+workspace:
+  # DAB deploy will sync this repo under this path.
+  root_path: /Workspace/Shared/.bundles/${bundle.name}/${bundle.target}
+
+resources:
+  jobs:
+    build_demo_tables:
+      name: ${bundle.name}-${bundle.target}-build-demo-tables
+      tasks:
+        - task_key: seed_ref
+          job_cluster_key: demo_cluster
+          notebook_task:
+            notebook_path: ${workspace.root_path}/notebooks/01_seed_reference_data.ipynb
+            base_parameters:
+              catalog: ${var.catalog}
+              schema_ref: ${var.schema_ref}
+              schema_bronze: ${var.schema_bronze}
+              schema_silver: ${var.schema_silver}
+              schema_gold: ${var.schema_gold}
+              n_providers: ${var.n_providers}
+              days_schedule: ${var.days_schedule}
+              seed: ${var.seed}
+
+        - task_key: bronze_providers_and_credentials
+          depends_on:
+            - task_key: seed_ref
+          job_cluster_key: demo_cluster
+          notebook_task:
+            notebook_path: ${workspace.root_path}/notebooks/02_generate_providers_and_credentials.ipynb
+            base_parameters:
+              catalog: ${var.catalog}
+              schema_ref: ${var.schema_ref}
+              schema_bronze: ${var.schema_bronze}
+              schema_silver: ${var.schema_silver}
+              schema_gold: ${var.schema_gold}
+              n_providers: ${var.n_providers}
+              days_schedule: ${var.days_schedule}
+              seed: ${var.seed}
+
+        - task_key: bronze_shifts_and_assignments
+          depends_on:
+            - task_key: bronze_providers_and_credentials
+          job_cluster_key: demo_cluster
+          notebook_task:
+            notebook_path: ${workspace.root_path}/notebooks/03_generate_shifts_and_assignments.ipynb
+            base_parameters:
+              catalog: ${var.catalog}
+              schema_ref: ${var.schema_ref}
+              schema_bronze: ${var.schema_bronze}
+              schema_silver: ${var.schema_silver}
+              schema_gold: ${var.schema_gold}
+              n_providers: ${var.n_providers}
+              days_schedule: ${var.days_schedule}
+              seed: ${var.seed}
+
+        - task_key: build_gold_views
+          depends_on:
+            - task_key: bronze_shifts_and_assignments
+          job_cluster_key: demo_cluster
+          notebook_task:
+            notebook_path: ${workspace.root_path}/notebooks/04_build_gold_views.ipynb
+            base_parameters:
+              catalog: ${var.catalog}
+              schema_ref: ${var.schema_ref}
+              schema_bronze: ${var.schema_bronze}
+              schema_silver: ${var.schema_silver}
+              schema_gold: ${var.schema_gold}
+              n_providers: ${var.n_providers}
+              days_schedule: ${var.days_schedule}
+              seed: ${var.seed}
+
+        - task_key: train_and_score_model
+          depends_on:
+            - task_key: build_gold_views
+          job_cluster_key: demo_cluster
+          notebook_task:
+            notebook_path: ${workspace.root_path}/notebooks/05_train_and_deploy_ml.ipynb
+            base_parameters:
+              catalog: ${var.catalog}
+              schema_ref: ${var.schema_ref}
+              schema_bronze: ${var.schema_bronze}
+              schema_silver: ${var.schema_silver}
+              schema_gold: ${var.schema_gold}
+              n_providers: ${var.n_providers}
+              days_schedule: ${var.days_schedule}
+              seed: ${var.seed}
+
+      job_clusters:
+        - job_cluster_key: demo_cluster
+          new_cluster:
+            policy_id: ${var.cluster_policy_id}
+            num_workers: ${var.num_workers}
+
+targets:
+  dev:
+    default: true
+  prod:
+    # Override any variables here for prod as needed.
+    variables:
+      num_workers: 2
+

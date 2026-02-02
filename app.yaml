@@ -1,0 +1,32 @@
+name: staffing-credentialing-demo
+type: web
+runtime: python3.10
+# Databricks Apps convention: bind to $DATABRICKS_APP_PORT
+# Build frontend, then start FastAPI which serves the built SPA.
+command:
+  [
+    "sh",
+    "-c",
+    "npm run build && exec uvicorn backend.app:app --host 0.0.0.0 --port ${DATABRICKS_APP_PORT} --lifespan off --timeout-graceful-shutdown 10",
+  ]
+env:
+  - name: APP_ENV
+    value: "prod"
+  - name: ALLOW_MOCK_DATA
+    value: "false"
+  - name: DATABRICKS_SERVER_HOSTNAME
+    value: "YOUR SERVER HOSTNAME"
+  # Prefer using a Databricks SQL Warehouse resource. This injects the warehouse HTTP path.
+  - name: DATABRICKS_SQL_WAREHOUSE_HTTP_PATH
+    valueFrom: sql-warehouse
+  - name: LOG_LEVEL
+    value: "INFO"
+  # Catalog/schemas (match notebooks/schema_json defaults; override if desired)
+  - name: DATABRICKS_CATALOG
+    value: "YOUR CATALOG"
+  - name: DATABRICKS_SCHEMA_GOLD
+    value: "credentialing_gold"
+resources:
+  # Update this to your warehouse id in the Databricks workspace.
+  sql-warehouse: "YOUR WAREHOUSE ID"
+
