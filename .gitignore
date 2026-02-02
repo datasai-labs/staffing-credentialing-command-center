@@ -25,6 +25,8 @@ app/backend/.env
 app/backend/.env.*
 app/backend/env.local
 *.local
+app.yaml
+app.yaml.private.example
 
 # IDE / OS
 .DS_Store
