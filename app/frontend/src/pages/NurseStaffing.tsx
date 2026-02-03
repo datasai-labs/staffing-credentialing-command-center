@@ -18,15 +18,17 @@ import {
   useCredentialGaps,
   useNurseStaffingKpis,
   useNurseStaffingSummary,
+  useOptimizationSummary,
+  useStaffingOptimization,
   useUnitDetail
 } from "../api/hooks";
-import { CredentialGapRow, NurseStaffingSummary } from "../api/types";
+import { CredentialGapRow, NurseStaffingSummary, StaffingOptimization } from "../api/types";
 import { DataTable, ServerTableState } from "../components/DataTable";
 import { FilterBar, SearchInput } from "../components/FilterBar";
 import { SidePanel } from "../components/SidePanel";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
 
-type TabKey = "ratios" | "outsourced" | "credential_gaps";
+type TabKey = "ratios" | "outsourced" | "credential_gaps" | "auto_optimize";
 
 const UNIT_TYPES = ["ICU", "STEP_DOWN", "MED_SURG", "TELEMETRY", "ED", "OR", "NICU"];
 
@@ -115,6 +117,8 @@ export function NurseStaffing() {
 
   const [selectedUnit, setSelectedUnit] = useState<NurseStaffingSummary | null>(null);
   const [selectedGap, setSelectedGap] = useState<CredentialGapRow | null>(null);
+  const [selectedOpt, setSelectedOpt] = useState<StaffingOptimization | null>(null);
+  const [priorityFilter, setPriorityFilter] = useState("");
 
   // API calls
   const kpis = useNurseStaffingKpis({ facility_id: facilityId || undefined });
@@ -134,6 +138,13 @@ export function NurseStaffing() {
   });
   const costBreakdown = useCostBreakdown({ facility_id: facilityId || undefined });
   const unitDetail = useUnitDetail(selectedUnit?.unit_id);
+  const optimizationSummary = useOptimizationSummary({ facility_id: facilityId || undefined });
+  const staffingOptimization = useStaffingOptimization({
+    facility_id: facilityId || undefined,
+    priority: priorityFilter || undefined,
+    page: tableState.page,
+    page_size: tableState.pageSize
+  });
 
   const onStateChange = (s: ServerTableState) => {
     setTableState(s);
@@ -212,6 +223,70 @@ export function NurseStaffing() {
             />
           );
         }
+      }
+    ],
+    []
+  );
+
+  // Auto-optimize columns
+  const optCols: GridColDef[] = useMemo(
+    () => [
+      { field: "forecast_date", headerName: "Date", width: 110 },
+      { field: "unit_name", headerName: "Unit", flex: 1, minWidth: 140 },
+      { field: "unit_type", headerName: "Type", width: 90 },
+      { field: "predicted_census", headerName: "Census", type: "number", width: 80 },
+      { field: "nurses_required", headerName: "Required", type: "number", width: 90 },
+      { field: "current_staffed", headerName: "Current", type: "number", width: 80 },
+      {
+        field: "staffing_delta",
+        headerName: "Delta",
+        type: "number",
+        width: 80,
+        renderCell: (p) => (
+          <Typography color={p.value > 0 ? "error.main" : p.value < 0 ? "success.main" : "text.secondary"} fontWeight={600}>
+            {p.value > 0 ? `+${p.value}` : p.value}
+          </Typography>
+        )
+      },
+      {
+        field: "opt_total",
+        headerName: "Optimized",
+        width: 100,
+        renderCell: (p) => (
+          <Box>
+            <Typography variant="body2">{p.value}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {p.row.opt_internal}I/{p.row.opt_contract}C/{p.row.opt_agency}A
+            </Typography>
+          </Box>
+        )
+      },
+      {
+        field: "cost_savings",
+        headerName: "Savings",
+        type: "number",
+        width: 100,
+        renderCell: (p) => (
+          <Typography color={p.value > 0 ? "success.main" : "text.secondary"} fontWeight={p.value > 0 ? 600 : 400}>
+            {p.value > 0 ? `$${Math.round(p.value).toLocaleString()}` : "—"}
+          </Typography>
+        )
+      },
+      {
+        field: "priority",
+        headerName: "Priority",
+        width: 100,
+        renderCell: (p) => {
+          const colors: Record<string, string> = { HIGH: "#ef4444", MEDIUM: "#f59e0b", LOW: "#64748b" };
+          return <Chip size="small" label={p.value} sx={{ bgcolor: colors[p.value as string], color: "white", fontWeight: 600 }} />;
+        }
+      },
+      {
+        field: "confidence_pct",
+        headerName: "Conf.",
+        type: "number",
+        width: 70,
+        valueFormatter: (p: any) => `${p?.value}%`
       }
     ],
     []
@@ -396,6 +471,57 @@ export function NurseStaffing() {
     );
   };
 
+  const renderAutoOptimizeTab = () => {
+    const active = staffingOptimization;
+    const rows = active.data?.items ?? [];
+    const total = active.data?.total ?? 0;
+    const summary = optimizationSummary.data;
+
+    return (
+      <Stack spacing={3}>
+        {summary && (
+          <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+            <StatCard title="7-Day Nurses Needed" value={summary.total_nurses_needed} />
+            <StatCard
+              title="Units Need Attention"
+              value={summary.units_needing_attention}
+              color={summary.units_needing_attention > 5 ? "#f59e0b" : undefined}
+            />
+            <StatCard
+              title="High Priority"
+              value={summary.high_priority_count}
+              color={summary.high_priority_count > 0 ? "#ef4444" : "#22c55e"}
+            />
+            <StatCard title="Optimized Cost" value={`$${Math.round(summary.total_optimized_cost).toLocaleString()}`} />
+            <StatCard
+              title="Potential Savings"
+              value={`$${Math.round(summary.total_potential_savings).toLocaleString()}`}
+              color={summary.total_potential_savings > 0 ? "#22c55e" : undefined}
+              subtitle="Next 7 days"
+            />
+          </Stack>
+        )}
+
+        {active.isError ? (
+          <ErrorState message={(active.error as Error).message} onRetry={() => active.refetch()} />
+        ) : (
+          <DataTable<StaffingOptimization>
+            rows={rows}
+            columns={optCols}
+            total={total}
+            loading={active.isLoading || active.isFetching}
+            state={tableState}
+            onStateChange={onStateChange}
+            getRowId={(r) => `${r.unit_id}-${r.forecast_date}`}
+            onRowClick={(r) => setSelectedOpt(r)}
+            csvFileName="staffing_optimization"
+            height={480}
+          />
+        )}
+      </Stack>
+    );
+  };
+
   return (
     <Stack spacing={3}>
       <Typography variant="h5">Nurse Staffing Command Center</Typography>
@@ -408,12 +534,14 @@ export function NurseStaffing() {
           setTab(v);
           setSelectedUnit(null);
           setSelectedGap(null);
+          setSelectedOpt(null);
           setTableState((s) => ({ ...s, page: 1 }));
         }}
       >
         <Tab value="ratios" label="Ratio Monitor" />
         <Tab value="outsourced" label="Outsourced Staff & Costs" />
         <Tab value="credential_gaps" label="Credential Gaps" />
+        <Tab value="auto_optimize" label="Auto-Optimize" sx={{ fontWeight: 700, color: "#8b5cf6" }} />
       </Tabs>
 
       <FilterBar
@@ -422,11 +550,14 @@ export function NurseStaffing() {
           setUnitType("");
           setStaffingStatus("");
           setGapSeverity("");
+          setPriorityFilter("");
         }}
       >
         <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ width: "100%" }}>
           <SearchInput value={facilityId} onChange={setFacilityId} placeholder="Facility ID…" />
-          <SearchInput value={unitType} onChange={setUnitType} placeholder="Unit type (ICU, ED, MED_SURG…)" />
+          {tab !== "auto_optimize" && (
+            <SearchInput value={unitType} onChange={setUnitType} placeholder="Unit type (ICU, ED, MED_SURG…)" />
+          )}
           {tab === "ratios" && (
             <SearchInput
               value={staffingStatus}
@@ -437,6 +568,9 @@ export function NurseStaffing() {
           {tab === "credential_gaps" && (
             <SearchInput value={gapSeverity} onChange={setGapSeverity} placeholder="Severity (LOW,MEDIUM,HIGH,CRITICAL)" />
           )}
+          {tab === "auto_optimize" && (
+            <SearchInput value={priorityFilter} onChange={setPriorityFilter} placeholder="Priority (LOW,MEDIUM,HIGH)" />
+          )}
         </Stack>
       </FilterBar>
 
@@ -444,6 +578,7 @@ export function NurseStaffing() {
         {tab === "ratios" && renderRatiosTab()}
         {tab === "outsourced" && renderOutsourcedTab()}
         {tab === "credential_gaps" && renderCredentialGapsTab()}
+        {tab === "auto_optimize" && renderAutoOptimizeTab()}
       </Box>
 
       {/* Unit Detail Side Panel */}
@@ -642,6 +777,96 @@ export function NurseStaffing() {
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {selectedGap.affected_nurse_ids.join(", ")}
+                </Typography>
+              </Box>
+            )}
+          </Stack>
+        ) : null}
+      </SidePanel>
+
+      {/* Optimization Recommendation Side Panel */}
+      <SidePanel
+        open={Boolean(selectedOpt)}
+        onClose={() => setSelectedOpt(null)}
+        title="Staffing Recommendation"
+        subtitle={selectedOpt ? `${selectedOpt.unit_name} • ${selectedOpt.forecast_date}` : undefined}
+        width={520}
+      >
+        {selectedOpt ? (
+          <Stack spacing={2}>
+            <Box sx={{ p: 2, bgcolor: selectedOpt.priority === "HIGH" ? "error.50" : "action.hover", borderRadius: 2 }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Action</Typography>
+                  <Typography variant="h6" fontWeight={700}>{selectedOpt.action}</Typography>
+                </Box>
+                <Chip
+                  label={selectedOpt.priority}
+                  sx={{
+                    bgcolor: selectedOpt.priority === "HIGH" ? "#ef4444" : selectedOpt.priority === "MEDIUM" ? "#f59e0b" : "#64748b",
+                    color: "white", fontWeight: 600
+                  }}
+                />
+              </Stack>
+            </Box>
+
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>Demand Forecast</Typography>
+              <Stack direction="row" spacing={2}>
+                <Card variant="outlined" sx={{ flex: 1, p: 2, textAlign: "center" }}>
+                  <Typography variant="caption" color="text.secondary">Predicted Census</Typography>
+                  <Typography variant="h5">{selectedOpt.predicted_census}</Typography>
+                </Card>
+                <Card variant="outlined" sx={{ flex: 1, p: 2, textAlign: "center" }}>
+                  <Typography variant="caption" color="text.secondary">Nurses Required</Typography>
+                  <Typography variant="h5">{selectedOpt.nurses_required}</Typography>
+                </Card>
+                <Card variant="outlined" sx={{ flex: 1, p: 2, textAlign: "center" }}>
+                  <Typography variant="caption" color="text.secondary">Confidence</Typography>
+                  <Typography variant="h5">{selectedOpt.confidence_pct}%</Typography>
+                </Card>
+              </Stack>
+            </Box>
+
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>Optimized Staffing Mix</Typography>
+              <Stack direction="row" spacing={1}>
+                <Chip label={`Internal: ${selectedOpt.opt_internal}`} sx={{ bgcolor: EMPLOYMENT_COLORS.INTERNAL, color: "white" }} />
+                <Chip label={`Contract: ${selectedOpt.opt_contract}`} sx={{ bgcolor: EMPLOYMENT_COLORS.CONTRACT, color: "white" }} />
+                <Chip label={`Agency: ${selectedOpt.opt_agency}`} sx={{ bgcolor: EMPLOYMENT_COLORS.AGENCY, color: "white" }} />
+              </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+                Internal: {selectedOpt.internal_pct.toFixed(0)}% • Outsourced: {selectedOpt.outsourced_pct.toFixed(0)}%
+              </Typography>
+            </Box>
+
+            <Box sx={{ p: 2, bgcolor: "action.hover", borderRadius: 2 }}>
+              <Stack direction="row" justifyContent="space-between">
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Current Cost</Typography>
+                  <Typography variant="h6">${Math.round(selectedOpt.current_daily_cost).toLocaleString()}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Optimized Cost</Typography>
+                  <Typography variant="h6">${Math.round(selectedOpt.opt_daily_cost).toLocaleString()}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Savings</Typography>
+                  <Typography variant="h6" color={selectedOpt.cost_savings > 0 ? "success.main" : "text.primary"}>
+                    ${Math.round(selectedOpt.cost_savings).toLocaleString()}
+                  </Typography>
+                </Box>
+              </Stack>
+            </Box>
+
+            {selectedOpt.staffing_delta > 0 && (
+              <Box sx={{ p: 2, bgcolor: "warning.50", borderRadius: 2, border: "1px solid", borderColor: "warning.main" }}>
+                <Typography variant="subtitle2" color="warning.dark" gutterBottom>
+                  Action Required
+                </Typography>
+                <Typography variant="body2">
+                  This unit needs <strong>{selectedOpt.staffing_delta} additional nurse(s)</strong> for {selectedOpt.forecast_date}.
+                  Consider assigning available internal staff or scheduling contract coverage.
                 </Typography>
               </Box>
             )}

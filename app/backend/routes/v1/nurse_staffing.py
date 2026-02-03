@@ -7,10 +7,13 @@ from fastapi import APIRouter, Query
 
 from models.common import PageResponse, parse_date
 from models.nurse_staffing import (
+    CensusForecast,
     CostBreakdown,
     CredentialGapRow,
     NurseStaffingKpis,
     NurseStaffingSummary,
+    OptimizationSummary,
+    StaffingOptimization,
     UnitDetail,
 )
 from routes.v1._dbx import dbx_or_mock
@@ -397,3 +400,165 @@ def get_cost_breakdown(
     if isinstance(row, CostBreakdown):
         return row
     return CostBreakdown.model_validate(row)
+
+
+@router.get("/forecast", response_model=PageResponse[CensusForecast])
+def get_census_forecast(
+    facility_id: Optional[str] = None,
+    unit_type: Optional[str] = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+):
+    """Get 7-day census forecasts by unit."""
+
+    def _run():
+        filters = []
+        params = {"limit": page_size, "offset": (page - 1) * page_size}
+        if facility_id:
+            filters.append("facility_id = :fac")
+            params["fac"] = facility_id
+        if unit_type:
+            filters.append("unit_type = :ut")
+            params["ut"] = unit_type
+        where = " AND ".join(filters) if filters else "1=1"
+        
+        data_sql = f"""
+            SELECT * FROM {fq_gold('census_forecast')}
+            WHERE {where}
+            ORDER BY forecast_date, unit_name
+            LIMIT :limit OFFSET :offset
+        """
+        count_sql = f"SELECT COUNT(*) as cnt FROM {fq_gold('census_forecast')} WHERE {where}"
+        return databricks.fetch_paged(data_sql, count_sql, params)
+
+    def _mock():
+        # Generate mock forecast data
+        from datetime import timedelta
+        forecasts = []
+        units = mock_data.mock_units()
+        for i in range(1, 8):
+            forecast_date = date.today() + timedelta(days=i)
+            for u in units:
+                if facility_id and u.facility_id != facility_id:
+                    continue
+                if unit_type and u.unit_type != unit_type:
+                    continue
+                census = int(u.bed_count * (0.7 + 0.1 * (i % 3)))
+                forecasts.append(CensusForecast(
+                    forecast_date=forecast_date, unit_id=u.unit_id, facility_id=u.facility_id,
+                    facility_name=u.facility_name, unit_name=u.unit_name, unit_type=u.unit_type,
+                    bed_count=u.bed_count, predicted_census=census,
+                    predicted_occupancy_pct=round(census / u.bed_count * 100, 1),
+                    nurses_required=max(1, int(census / u.target_ratio + 0.5)),
+                    confidence_pct=85 - i * 2, is_weekend=forecast_date.weekday() >= 5))
+        total = len(forecasts)
+        start, end = (page - 1) * page_size, page * page_size
+        return (forecasts[start:end], total)
+
+    rows, total = dbx_or_mock(lambda: databricks.with_retry(_run), _mock)
+    items = [CensusForecast.model_validate(r) if not isinstance(r, CensusForecast) else r for r in rows]
+    return PageResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/optimization", response_model=PageResponse[StaffingOptimization])
+def get_staffing_optimization(
+    facility_id: Optional[str] = None,
+    priority: Optional[str] = Query(default=None, description="LOW,MEDIUM,HIGH"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+):
+    """Get auto-optimized staffing recommendations."""
+
+    def _run():
+        filters = []
+        params = {"limit": page_size, "offset": (page - 1) * page_size}
+        if facility_id:
+            filters.append("facility_id = :fac")
+            params["fac"] = facility_id
+        if priority:
+            filters.append("priority = :pri")
+            params["pri"] = priority
+        where = " AND ".join(filters) if filters else "1=1"
+        
+        data_sql = f"""
+            SELECT * FROM {fq_gold('staffing_optimization')}
+            WHERE {where}
+            ORDER BY priority DESC, forecast_date, unit_name
+            LIMIT :limit OFFSET :offset
+        """
+        count_sql = f"SELECT COUNT(*) as cnt FROM {fq_gold('staffing_optimization')} WHERE {where}"
+        return databricks.fetch_paged(data_sql, count_sql, params)
+
+    def _mock():
+        from datetime import timedelta
+        recs = []
+        units = mock_data.mock_units()
+        summaries = {s.unit_id: s for s in mock_data.mock_nurse_staffing_summary()}
+        for i in range(1, 8):
+            forecast_date = date.today() + timedelta(days=i)
+            for u in units:
+                if facility_id and u.facility_id != facility_id:
+                    continue
+                s = summaries.get(u.unit_id)
+                census = int(u.bed_count * (0.7 + 0.1 * (i % 3)))
+                required = max(1, int(census / u.target_ratio + 0.5))
+                current = s.nurses_assigned if s else 0
+                delta = required - current
+                pri = "HIGH" if delta >= 2 else "MEDIUM" if delta > 0 else "LOW"
+                if priority and pri != priority:
+                    continue
+                opt_internal = min(int(required * 0.6), s.nurses_internal if s else required)
+                opt_contract = min(required - opt_internal, s.nurses_contract if s else 0)
+                opt_agency = required - opt_internal - opt_contract
+                opt_cost = (opt_internal * 50 + opt_contract * 75 + opt_agency * 95) * 12
+                curr_cost = s.labor_cost_daily if s else opt_cost
+                recs.append(StaffingOptimization(
+                    forecast_date=forecast_date, unit_id=u.unit_id, facility_id=u.facility_id,
+                    facility_name=u.facility_name, unit_name=u.unit_name, unit_type=u.unit_type,
+                    predicted_census=census, nurses_required=required, current_staffed=current,
+                    staffing_delta=delta, opt_internal=opt_internal, opt_contract=opt_contract,
+                    opt_agency=opt_agency, opt_total=required, opt_daily_cost=opt_cost,
+                    internal_pct=round(opt_internal / required * 100 if required else 0, 1),
+                    outsourced_pct=round((opt_contract + opt_agency) / required * 100 if required else 0, 1),
+                    current_daily_cost=curr_cost, cost_savings=curr_cost - opt_cost,
+                    action=f"STAFF_UP: Add {delta}" if delta > 0 else "OPTIMAL",
+                    priority=pri, confidence_pct=85 - i * 2))
+        total = len(recs)
+        start, end = (page - 1) * page_size, page * page_size
+        return (recs[start:end], total)
+
+    rows, total = dbx_or_mock(lambda: databricks.with_retry(_run), _mock)
+    items = [StaffingOptimization.model_validate(r) if not isinstance(r, StaffingOptimization) else r for r in rows]
+    return PageResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/optimization/summary", response_model=OptimizationSummary)
+def get_optimization_summary(facility_id: Optional[str] = None):
+    """Get 7-day optimization outlook summary."""
+
+    def _run():
+        facility_filter = "AND facility_id = :fac" if facility_id else ""
+        sql = f"""
+            SELECT
+                COALESCE(SUM(nurses_required), 0) as total_nurses_needed,
+                COALESCE(SUM(opt_daily_cost), 0) as total_optimized_cost,
+                COALESCE(SUM(cost_savings), 0) as total_potential_savings,
+                SUM(CASE WHEN staffing_delta > 0 THEN 1 ELSE 0 END) as units_needing_attention,
+                SUM(CASE WHEN priority = 'HIGH' THEN 1 ELSE 0 END) as high_priority_count,
+                COUNT(DISTINCT forecast_date) as forecast_days
+            FROM {fq_gold('staffing_optimization')}
+            WHERE 1=1 {facility_filter}
+        """
+        params = {"fac": facility_id} if facility_id else {}
+        rows = databricks.fetch_all(sql, params).rows
+        return rows[0] if rows else None
+
+    def _mock():
+        return OptimizationSummary(
+            total_nurses_needed=420, total_optimized_cost=176400.0, total_potential_savings=12600.0,
+            units_needing_attention=15, high_priority_count=4, forecast_days=7)
+
+    row = dbx_or_mock(lambda: databricks.with_retry(_run), _mock)
+    if isinstance(row, OptimizationSummary):
+        return row
+    return OptimizationSummary.model_validate(row)

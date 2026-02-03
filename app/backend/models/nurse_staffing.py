@@ -125,3 +125,55 @@ class NurseStaffingKpis(BaseModel):
     daily_labor_cost: float = Field(ge=0)
     credential_gaps_count: int = Field(ge=0)
     last_built_at: Optional[datetime] = None
+
+
+class CensusForecast(BaseModel):
+    """Predicted census for a unit on a future date."""
+    forecast_date: date
+    unit_id: str
+    facility_id: str
+    facility_name: Optional[str] = None
+    unit_name: str
+    unit_type: str
+    bed_count: int
+    predicted_census: int
+    predicted_occupancy_pct: float
+    nurses_required: int
+    confidence_pct: int
+    is_weekend: bool = False
+
+
+class StaffingOptimization(BaseModel):
+    """Auto-optimized staffing recommendation."""
+    forecast_date: date
+    unit_id: str
+    facility_id: str
+    facility_name: Optional[str] = None
+    unit_name: str
+    unit_type: str
+    predicted_census: int
+    nurses_required: int
+    current_staffed: int
+    staffing_delta: int
+    opt_internal: int
+    opt_contract: int
+    opt_agency: int
+    opt_total: int
+    opt_daily_cost: float
+    internal_pct: float
+    outsourced_pct: float
+    current_daily_cost: float
+    cost_savings: float
+    action: str
+    priority: Literal["LOW", "MEDIUM", "HIGH"]
+    confidence_pct: int
+
+
+class OptimizationSummary(BaseModel):
+    """7-day optimization outlook summary."""
+    total_nurses_needed: int
+    total_optimized_cost: float
+    total_potential_savings: float
+    units_needing_attention: int
+    high_priority_count: int
+    forecast_days: int

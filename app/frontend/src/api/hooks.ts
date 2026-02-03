@@ -2,12 +2,13 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { z } from "zod";
 import { apiGet, apiPatch, apiPost, toQuery } from "./client";
 import {
-  ActionsSummarySchema, CostBreakdownSchema, CredentialGapRowSchema, CredentialRiskRowSchema,
-  CredentialRiskSummaryResponseSchema, CredentialExpiringRowSchema, KpiSummaryDailySchema,
-  KpiTrendResponseSchema, NurseStaffingKpisSchema, NurseStaffingSummarySchema, PageResponseSchema,
-  ProviderBlockersRowSchema, Provider360Schema, ProviderDetailResponseSchema, ProvidersSummaryResponseSchema,
-  RiskActionSchema, ScenarioCoverageResponseSchema, ShiftRecommendationsSchema,
-  ShiftEligibilityExplainResponseSchema, ShiftPredictionResponseSchema, StaffingGapSchema,
+  ActionsSummarySchema, CensusForecastSchema, CostBreakdownSchema, CredentialGapRowSchema,
+  CredentialRiskRowSchema, CredentialRiskSummaryResponseSchema, CredentialExpiringRowSchema,
+  KpiSummaryDailySchema, KpiTrendResponseSchema, NurseStaffingKpisSchema, NurseStaffingSummarySchema,
+  OptimizationSummarySchema, PageResponseSchema, ProviderBlockersRowSchema, Provider360Schema,
+  ProviderDetailResponseSchema, ProvidersSummaryResponseSchema, RiskActionSchema,
+  ScenarioCoverageResponseSchema, ShiftRecommendationsSchema, ShiftEligibilityExplainResponseSchema,
+  ShiftPredictionResponseSchema, StaffingGapSchema, StaffingOptimizationSchema,
   StaffingSummaryResponseSchema, UnitDetailSchema, CreateRiskActionRequestSchema, UpdateRiskActionRequestSchema
 } from "./types";
 
@@ -147,3 +148,12 @@ export const useCredentialGaps = (params: { facility_id?: string; unit_type?: st
 
 export const useCostBreakdown = (params: { facility_id?: string; start_date?: string; end_date?: string } = {}) =>
   useGet(["cost_breakdown", params], `/api/v1/nurse_staffing/cost_breakdown${toQuery(params)}`, CostBreakdownSchema);
+
+export const useCensusForecast = (params: { facility_id?: string; unit_type?: string; page: number; page_size: number }) =>
+  usePaged("census_forecast", "/api/v1/nurse_staffing/forecast", CensusForecastSchema, params);
+
+export const useStaffingOptimization = (params: { facility_id?: string; priority?: string; page: number; page_size: number }) =>
+  usePaged("staffing_optimization", "/api/v1/nurse_staffing/optimization", StaffingOptimizationSchema, params);
+
+export const useOptimizationSummary = (params: { facility_id?: string } = {}) =>
+  useGet(["optimization_summary", params], `/api/v1/nurse_staffing/optimization/summary${toQuery(params)}`, OptimizationSummarySchema);

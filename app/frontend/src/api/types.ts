@@ -420,3 +420,55 @@ export const NurseStaffingKpisSchema = z.object({
   last_built_at: z.string().nullable().optional()
 });
 export type NurseStaffingKpis = z.infer<typeof NurseStaffingKpisSchema>;
+
+export const CensusForecastSchema = z.object({
+  forecast_date: z.string(),
+  unit_id: z.string(),
+  facility_id: z.string(),
+  facility_name: z.string().nullable().optional(),
+  unit_name: z.string(),
+  unit_type: z.string(),
+  bed_count: z.number(),
+  predicted_census: z.number(),
+  predicted_occupancy_pct: z.number(),
+  nurses_required: z.number(),
+  confidence_pct: z.number(),
+  is_weekend: z.boolean().default(false)
+});
+export type CensusForecast = z.infer<typeof CensusForecastSchema>;
+
+export const StaffingOptimizationSchema = z.object({
+  forecast_date: z.string(),
+  unit_id: z.string(),
+  facility_id: z.string(),
+  facility_name: z.string().nullable().optional(),
+  unit_name: z.string(),
+  unit_type: z.string(),
+  predicted_census: z.number(),
+  nurses_required: z.number(),
+  current_staffed: z.number(),
+  staffing_delta: z.number(),
+  opt_internal: z.number(),
+  opt_contract: z.number(),
+  opt_agency: z.number(),
+  opt_total: z.number(),
+  opt_daily_cost: z.number(),
+  internal_pct: z.number(),
+  outsourced_pct: z.number(),
+  current_daily_cost: z.number(),
+  cost_savings: z.number(),
+  action: z.string(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH"]),
+  confidence_pct: z.number()
+});
+export type StaffingOptimization = z.infer<typeof StaffingOptimizationSchema>;
+
+export const OptimizationSummarySchema = z.object({
+  total_nurses_needed: z.number(),
+  total_optimized_cost: z.number(),
+  total_potential_savings: z.number(),
+  units_needing_attention: z.number(),
+  high_priority_count: z.number(),
+  forecast_days: z.number()
+});
+export type OptimizationSummary = z.infer<typeof OptimizationSummarySchema>;
